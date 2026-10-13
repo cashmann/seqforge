@@ -1,0 +1,8 @@
+[package]
+name = "sf-seq"
+description = "Zelda64 (OoT/MM) music sequence (MML) disassembler and assembler"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

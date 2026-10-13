@@ -1,0 +1,13 @@
+[package]
+name = "seqforge"
+description = "SeqForge command-line tools"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+sf-seq = { path = "../sf-seq" }
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+walkdir = "2"
+zip = { version = "2", default-features = false, features = ["deflate"] }

@@ -1,0 +1,55 @@
+; Hand-written demo sequence for CI smoke tests (no game data).
+.game oot
+
+.sequence
+start:
+    mutebhv 32
+    initchan 0x0003
+    ldchan 0, melody
+    ldchan 1, bass
+    tempo 120
+loop_top:
+    delay 384
+    jump loop_top
+
+.channel
+melody:
+    noshort
+    instr 3
+    vol 100
+    pan 64
+    ldlayer 0, melody_notes
+    env melody_env
+    delay 384
+    end
+
+bass:
+    instr 7
+    ldlayer 0, bass_notes
+    delay 384
+    end
+
+.layer large
+melody_notes:
+    notedvg 39, 96, 100, 0
+    notedv 41, 96, 90
+    notevg 43, 80, 26
+    portamento 0x81, 44, 12
+    notedv 44, 96, 100
+    noportamento
+    ldelay long(5)
+    end
+
+.layer short
+bass_notes:
+    shortvel 100
+    shortdvg 15, 192
+    shortdv 17
+    shortvg 19
+    end
+
+.envelope
+melody_env:
+    point 2, 32700
+    point 1, 32000
+    hang
