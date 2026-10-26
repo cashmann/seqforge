@@ -2,14 +2,21 @@
 
 Tools for N64 Zelda (OoT / MM) sequenced music. Design: [`DESIGN.md`](DESIGN.md).
 
-**Status: phase 0, first slice.** This covers the `seqforge` CLI with a disassembler and an assembler for OoT and MM sequences (`.zseq` / `.seq` / `.aseq`). A sequence round-trips through them byte for byte.
+**Status:** phase 0 (sequence tools) plus first slices of phase 1 (playback engine) and phase 2 (GUI).
+
+- **`seqforge` CLI:** disassembles and assembles OoT and MM sequences (`.zseq` / `.seq` / `.aseq`) byte for byte, reads ROMs, and renders sequences to WAV.
+- **`seqforge-gui`:** plays a ROM's sequences, or your own `.zseq`/`.ootrs`/`.mmrs` files (custom banks included), through the game's audio engine. It shows a transport, voice meter, channel strips, a note view and the live disassembly.
+
+You supply the ROM. Nothing from the games is in this repository.
 
 ## Build
 
 ```sh
-cargo build --release        # binary: target/release/seqforge
+cargo build --release        # binaries: target/release/seqforge, target/release/seqforge-gui
 cargo test
 ```
+
+Linux needs the ALSA headers for audio output (`sudo apt install libasound2-dev`).
 
 CI (`.github/workflows/ci.yml`) runs on every push and pull request:
 - **Lint** on Ubuntu: rustfmt and clippy, with warnings treated as errors.
@@ -32,6 +39,32 @@ seqforge asm song.mus -o song.zseq
 # Takes files or folders, and reads sequences inside .mmrs / .ootrs packages.
 seqforge roundtrip ~/personal/zelda-64-custom-music ~/personal/OoT-Custom-Sequences
 ```
+
+## Playback
+
+```sh
+# What's in a ROM (byte order, compression, audio tables, sequence names).
+seqforge rom oot.z64 --verbose
+
+# Render a ROM sequence (hex or decimal id) for 60 s, or until it ends.
+seqforge render --rom oot.z64 --seq 0x28 -o great-fairy.wav
+
+# Render your own sequence with a chosen soundfont.
+seqforge render --rom oot.z64 --file song.zseq --fonts 0x11 -o song.wav
+
+# The desktop app. Arguments are optional; you can also use File ▸ Open, or drop files on the window.
+seqforge-gui oot.z64 song.ootrs
+```
+
+In the app: Space plays and pauses, Home restarts, the mouse wheel scrolls the note view, and Ctrl/Cmd+wheel zooms it. Engine ▸ Audio spec switches between the game's per-scene settings: voice count, reverb and sample rate.
+
+Both CLI and app use `sf-synth`, a port of the OoT audio engine from the zeldaret decomp. It runs the same sequence interpreter, note allocation and stealing, envelopes, vibrato, portamento, reverb and filters as the game. It also builds the same RSP command lists, which a high-level model of the audio microcode then executes. The output is the console's audio interface rate, 32006 Hz.
+
+Accuracy checks so far:
+- A sawtooth test note matches the game's pitch tables to within 0.2%.
+- Every vanilla OoT and MM sequence renders without errors.
+
+Comparison against BizHawk captures (`seqforge verify`) is next. MM sequences currently play on the OoT engine, so MM-only commands and behaviour are not modelled yet.
 
 ## Text format
 
@@ -99,8 +132,25 @@ The disassembler traces control flow from the sequence entry point and follows:
 
 Most of the undecoded vanilla bytes are in the SFX and ambience sequences (`00`, `01`), which dispatch through runtime-computed pointers. Music sequences decode at 90% or more; the rest is padding, short stubs, and unreachable code.
 
+## Crates
+
+| Crate | What it does |
+|---|---|
+| `sf-seq` | Opcode tables, disassembler, assembler |
+| `sf-rom` | Byte order, Yaz0, dmadata, audio tables, sequence names |
+| `sf-synth` | The audio engine and RSP microcode model |
+| `seqforge` | The CLI |
+| `sf-app` | The desktop app (egui + cpal) |
+
+## Credits
+
+- **zeldaret/oot and zeldaret/mm decomps (CC0):** the engine port, the data tables (`scripts/gen_tables.py`) and the sequence names (`scripts/gen_names.py`).
+- **mupen64plus-rsp-hle (GPL-2.0-or-later):** the microcode command semantics in `crates/sf-synth/src/rsp.rs`. They are used here under GPL-3.0-or-later.
+
 ## Not yet
 
-- Opcode tables are Rust constants. The design calls for TOML game profiles, which become worthwhile once SM64/SF64 are added.
-- No SEQ64 `.mus` import/export yet (different syntax).
-- Nothing beyond sequences yet: MIDI, banks, ROM injection and packaging are later phases.
+- **MM's engine differences:** MM-only channel/layer commands, its synthesis changes and its audio specs.
+- **Accuracy verification:** the BizHawk capture harness and `seqforge verify`.
+- **Opcode tables:** still Rust constants. The design calls for TOML game profiles, which become worthwhile once SM64/SF64 are added.
+- **SEQ64 `.mus`:** no import or export yet (different syntax).
+- **Editing:** the app is a player and viewer for now. MIDI import, banks, ROM injection and packaging are later phases.

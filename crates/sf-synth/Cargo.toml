@@ -1,0 +1,9 @@
+[package]
+name = "sf-synth"
+description = "Zelda64 (OoT) audio engine: sequence player, note pool, and RSP audio microcode, ported from the decomp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+sf-rom = { path = "../sf-rom" }

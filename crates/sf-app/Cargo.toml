@@ -1,0 +1,23 @@
+[package]
+name = "sf-app"
+description = "SeqForge: a REAPER-style editor and player for N64 Zelda sequenced music"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "seqforge-gui"
+path = "src/main.rs"
+
+[dependencies]
+sf-seq = { path = "../sf-seq" }
+sf-rom = { path = "../sf-rom" }
+sf-synth = { path = "../sf-synth" }
+anyhow = "1"
+cpal = "0.18.2"
+eframe = "0.36.2"
+rfd = "0.17.2"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+egui_kittest = { version = "0.36.2", features = ["eframe", "wgpu", "snapshot"] }
