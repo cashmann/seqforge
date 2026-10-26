@@ -49,6 +49,48 @@ enum Command {
         #[arg(short, long)]
         verbose: bool,
     },
+    /// Show a ROM's header and audio tables.
+    Rom {
+        rom: PathBuf,
+        /// List every sequence with its fonts and size.
+        #[arg(short, long)]
+        verbose: bool,
+    },
+    /// Render a sequence to WAV with the game's audio engine.
+    Render {
+        /// ROM to take soundfonts, samples and (with --seq) the sequence from.
+        #[arg(long)]
+        rom: PathBuf,
+        /// Sequence id in the ROM (hex like 0x28, or decimal).
+        #[arg(long, value_parser = parse_num, conflicts_with = "file")]
+        seq: Option<usize>,
+        /// A sequence file (.zseq/.seq) to play instead.
+        #[arg(long)]
+        file: Option<PathBuf>,
+        /// Fonts for --file, comma-separated (hex or decimal). Default: the
+        /// fonts of the slot it replaces.
+        #[arg(long, value_delimiter = ',', value_parser = parse_num)]
+        fonts: Vec<usize>,
+        /// Slot --file replaces.
+        #[arg(long, value_parser = parse_num, default_value = "0x02")]
+        slot: usize,
+        /// Seconds to render (stops early if the sequence ends).
+        #[arg(long, default_value_t = 60.0)]
+        seconds: f64,
+        /// Audio spec (0 is the game's default).
+        #[arg(long, default_value_t = 0)]
+        spec: usize,
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+}
+
+fn parse_num(s: &str) -> Result<usize, String> {
+    let r = match s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        Some(hex) => usize::from_str_radix(hex, 16),
+        None => s.parse(),
+    };
+    r.map_err(|_| format!("not a number: `{s}`"))
 }
 
 fn parse_game(s: &str) -> Result<Game, String> {
@@ -104,7 +146,161 @@ fn run(cli: Cli) -> Result<ExitCode> {
             game,
             verbose,
         } => roundtrip(&paths, game, verbose),
+        Command::Rom { rom, verbose } => rom_info(&rom, verbose),
+        Command::Render {
+            rom,
+            seq,
+            file,
+            fonts,
+            slot,
+            seconds,
+            spec,
+            output,
+        } => render(
+            &rom,
+            seq,
+            file.as_deref(),
+            &fonts,
+            slot,
+            seconds,
+            spec,
+            &output,
+        ),
     }
+}
+
+fn load_rom(path: &Path) -> Result<sf_rom::Rom> {
+    let raw = fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+    sf_rom::Rom::parse(&raw).with_context(|| path.display().to_string())
+}
+
+fn rom_info(path: &Path, verbose: bool) -> Result<ExitCode> {
+    let rom = load_rom(path)?;
+    let h = &rom.header;
+    println!(
+        "{} [{} rev {}] {:?}, {:?}",
+        h.title,
+        h.code,
+        h.version,
+        h.game(),
+        rom.byte_order
+    );
+    println!("{} files in dmadata", rom.files.len());
+    let a = rom.audio()?;
+    println!(
+        "{} sequences, {} soundfonts, {} sample banks; Audioseq {} KB, Audiobank {} KB, Audiotable {} KB",
+        a.seq_table.len(),
+        a.font_table.len(),
+        a.sample_bank_table.len(),
+        a.audioseq.len() / 1024,
+        a.audiobank.len() / 1024,
+        a.audiotable.len() / 1024
+    );
+    if verbose {
+        for i in 0..a.num_sequences() {
+            let e = a.seq_table[i];
+            let fonts: Vec<String> = a.seq_fonts(i).iter().map(|f| format!("{f:#04x}")).collect();
+            let name = sf_rom::sequence_name(a.game, i).unwrap_or("");
+            if e.is_pointer() {
+                println!("  seq {i:#04x} -> {:#04x}  {name}", e.addr);
+            } else {
+                println!(
+                    "  seq {i:#04x}: {:6} bytes, cache {}, fonts [{}]  {name}",
+                    e.size,
+                    e.cache_policy,
+                    fonts.join(", ")
+                );
+            }
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render(
+    rom_path: &Path,
+    seq: Option<usize>,
+    file: Option<&Path>,
+    fonts: &[usize],
+    slot: usize,
+    seconds: f64,
+    spec: usize,
+    output: &Path,
+) -> Result<ExitCode> {
+    let rom = load_rom(rom_path)?;
+    let audio = rom.audio()?;
+    let mut synth = sf_synth::Synth::new(audio, spec);
+    let player = sf_synth::player::BGM_MAIN;
+    match (seq, file) {
+        (Some(id), _) => synth.play(player, id),
+        (None, Some(path)) => {
+            let data = fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+            let fonts: Vec<u8> = fonts.iter().map(|&f| f as u8).collect();
+            synth.play_custom(
+                player,
+                slot,
+                &data,
+                (!fonts.is_empty()).then_some(&fonts[..]),
+            );
+        }
+        (None, None) => bail!("give --seq or --file"),
+    }
+
+    let rate = synth.sample_rate();
+    let max_frames = (seconds * 60.0) as usize;
+    let mut out = Vec::new();
+    let mut tail = None;
+    for frame in 0..max_frames {
+        synth.render_frame(&mut out);
+        if tail.is_none() && !synth.is_playing(player) {
+            // Let releases and reverb ring out for a second.
+            tail = Some(frame + 60);
+        }
+        if tail.is_some_and(|t| frame >= t) {
+            break;
+        }
+    }
+    write_wav(output, rate, &out)?;
+    let peak = out
+        .iter()
+        .flat_map(|s| s.iter())
+        .map(|&v| (v as i32).abs())
+        .max()
+        .unwrap_or(0);
+    eprintln!(
+        "wrote {:.1} s at {rate} Hz to {} (peak {:.1} dBFS{})",
+        out.len() as f64 / rate as f64,
+        output.display(),
+        20.0 * (peak.max(1) as f64 / 32768.0).log10(),
+        if tail.is_some() {
+            ", sequence ended"
+        } else {
+            ""
+        }
+    );
+    Ok(ExitCode::SUCCESS)
+}
+
+fn write_wav(path: &Path, rate: u32, samples: &[[i16; 2]]) -> Result<()> {
+    let data_len = (samples.len() * 4) as u32;
+    let mut w = Vec::with_capacity(44 + data_len as usize);
+    w.extend_from_slice(b"RIFF");
+    w.extend_from_slice(&(36 + data_len).to_le_bytes());
+    w.extend_from_slice(b"WAVEfmt ");
+    w.extend_from_slice(&16u32.to_le_bytes());
+    w.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    w.extend_from_slice(&2u16.to_le_bytes()); // stereo
+    w.extend_from_slice(&rate.to_le_bytes());
+    w.extend_from_slice(&(rate * 4).to_le_bytes());
+    w.extend_from_slice(&4u16.to_le_bytes());
+    w.extend_from_slice(&16u16.to_le_bytes());
+    w.extend_from_slice(b"data");
+    w.extend_from_slice(&data_len.to_le_bytes());
+    for s in samples {
+        w.extend_from_slice(&s[0].to_le_bytes());
+        w.extend_from_slice(&s[1].to_le_bytes());
+    }
+    fs::write(path, w).with_context(|| format!("writing {}", path.display()))
 }
 
 struct Sample {

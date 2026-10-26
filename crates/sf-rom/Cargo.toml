@@ -1,0 +1,8 @@
+[package]
+name = "sf-rom"
+description = "N64 Zelda ROM access: byte order, Yaz0, dmadata, and the audio tables"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

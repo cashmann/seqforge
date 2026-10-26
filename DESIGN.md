@@ -337,7 +337,7 @@ The HUD shows `Seq: 0x2F40 / 0x3800` live, with a breakdown by channel and by po
 
 Modeled on the decomp's audio library (`seqplayer.c`, `playback.c`, `synthesis.c`, `effects.c`, `envelope.c`):
 
-- **Sequence VM:** 4 sequence players. Player 2 is BGM; player 1 is the fanfare player, so you can audition a fanfare over a BGM. Channels, layers, IO arrays, Q/P registers and the call stack are all modeled.
+- **Sequence VM:** 4 sequence players: 0 is main BGM, 1 is fanfares, 2 is SFX, 3 is sub-BGM, so a fanfare can be auditioned over a BGM. Channels, layers, IO arrays, Q/P registers and the call stack are all modeled.
 - **Note pool:** `numNotes` from the spec, with priority stealing and release-phase recycling.
 - **DSP:**
   - 32 kHz output (22050 for specs that use it), host-resampled to the device rate
@@ -534,6 +534,11 @@ The `.mmrs` ⇄ `.ootrs` conversion in `convert.py` becomes a built-in action, s
 | **4. ROM injection** | Profiles for OoT 1.0, OoT MQ Debug and MM US; append + repoint; BPS; Build & Run | Direct-to-ROM workflow |
 | **5. Ecosystem** | Decomp XML/AIFC, z64rom tree, community profile with LUFS, formmask editor, Lua API | Fits every pipeline |
 | **6. More games** | SM64 / SF64 / MK64 ABI + profiles | Generality |
+
+**Status (2026-10-13):**
+- Phase 0: disassembler/assembler done; ROM identify, Yaz0 and the audio tables done (`sf-rom`). Still open: CRC, `.ootrs`/`.mmrs` writing, TOML game profiles.
+- Phase 1 (first slice): `sf-synth` ports the OoT engine (`seqplayer.c`, `playback.c`, `effects.c`, `synthesis.c`, font relocation from `load.c`) and runs its command lists on a high-level model of the RSP microcode, with semantics ported from mupen64plus-rsp-hle (GPL-2.0-or-later). `seqforge render` writes WAVs. Still open: MM's engine differences, the BizHawk harness and `seqforge verify`.
+- Phase 2 (first slice): `sf-app` plays ROM sequences and `.zseq`/`.ootrs`/`.mmrs` files (including custom banks) with transport, voice meter, per-channel mute/solo with layer activity, a layer-aware note view of what the engine played, live disassembly and WAV export. Still open: editing, `.mid`/`.RPP` import, the project model.
 
 **Suggested first slice (one or two weeks):** `seqforge disasm` / `asm` for OoT with byte-identical round-trip over every `.zseq` in your `MM-Custom-Sequences` and `OoT-Custom-Sequences` libraries. They are a ready-made test corpus of hundreds of real-world files.
 
